@@ -652,6 +652,7 @@ function saveMark() {
     store.setItem('playfulPlaces', JSON.stringify(data));
     saveToCloud();
     newCardBanner.classList.remove('show');
+    closeModal();
 
     if (isWildcard && (ext || int || butt)) {
       build();
