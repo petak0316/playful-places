@@ -1,4 +1,4 @@
-const CACHE = 'playful-places-v1';
+const CACHE = 'playful-places-v2';
 const ASSETS = [
   './',
   './playful-places.html',
