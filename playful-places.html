@@ -126,7 +126,22 @@
     gap: 8px;
     margin-top: 10px;
     justify-content: center;
-  } 
+  }
+  .sync-dot {
+    position: fixed;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #666;
+    box-shadow: 0 0 6px rgba(0,0,0,0.4);
+    z-index: 50;
+    transition: background 0.3s;
+  }
+  .sync-dot.ok { background: #3dd68c; box-shadow: 0 0 8px #3dd68c; }
+  .sync-dot.bad { background: #ff4d4d; box-shadow: 0 0 8px #ff4d4d; }
     margin-top: 12px; 
     color: #ff6b9d; 
     font-weight: 600; 
@@ -137,19 +152,28 @@
   .modal {
     display: none;
     position: fixed;
-    inset: 0;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
     background: rgba(0,0,0,0.8);
-    z-index: 100;
+    z-index: 99999;
     align-items: center;
     justify-content: center;
   }
-  .modal.show { display: flex; }
+  .modal.show { 
+    display: flex !important; 
+  }
   .modal-box {
     background: #1e1e24;
     border: 1.5px solid #ff6b9d;
     border-radius: 16px;
     padding: 20px;
     max-width: 300px;
+    width: 90%;
+    position: relative;
+    margin: auto;
+  }
     width: 90%;
   }
   .modal-box h3 { margin: 0 0 14px; color: #ff6b9d; font-size: 1.15rem; text-align: center; }
@@ -247,11 +271,12 @@
     <button class="secondary" onclick="reshuffle()" id="reshuffleBtn">Reshuffle (2 left)</button>
     <button class="secondary" onclick="resetBoard()">Reset</button>
   </div>
-  <div class="sync-box">
+  <div class="sync-box" id="syncBox">
     <input type="text" id="roomCode" placeholder="Sync code" maxlength="12" style="padding:10px; border-radius:10px; border:1px solid #444; background:#1e1e24; color:#fff; width:140px; text-align:center; font-size:16px;">
     <button class="secondary" onclick="joinRoom()">Sync</button>
     <span id="syncStatus" style="font-size:12px; color:#888; margin-left:6px;"></span>
   </div>
+  <div id="syncDot" class="sync-dot"></div>
   <div id="status"></div>
 
   <div class="new-card-banner" id="newCardBanner">
@@ -260,7 +285,12 @@
     <button onclick="newCard()">Generate New Card</button>
   </div>
 
-  <div class="modal" id="modal">
+  
+  </div>
+
+  <div class="popup" id="popup"></div>
+
+<div class="modal" id="modal">
     <div class="modal-box">
       <h3 id="modalTitle">Mark this spot</h3>
       <div class="options">
@@ -289,10 +319,6 @@
         <button type="button" class="secondary" id="cancelBtn">Cancel</button>
       </div>
     </div>
-  </div>
-
-  <div class="popup" id="popup"></div>
-
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const store = (() => {
@@ -413,10 +439,26 @@ async function joinRoom() {
   if (!code) return;
   currentRoom = code;
   localStorage.setItem('playfulRoom', code);
-  document.getElementById('syncStatus').textContent = 'Connecting…';
-  await loadFromCloud();
-  subscribeToRoom();
-  document.getElementById('syncStatus').textContent = 'Synced';
+  const statusEl = document.getElementById('syncStatus');
+  const box = document.getElementById('syncBox');
+  const dot = document.getElementById('syncDot');
+  if (statusEl) statusEl.textContent = 'Connecting…';
+  try {
+    await loadFromCloud();
+    subscribeToRoom();
+    if (statusEl) statusEl.textContent = 'Synced';
+    if (box) box.style.display = 'none';
+    if (dot) {
+      dot.classList.remove('bad');
+      dot.classList.add('ok');
+    }
+  } catch (e) {
+    if (statusEl) statusEl.textContent = 'Failed';
+    if (dot) {
+      dot.classList.remove('ok');
+      dot.classList.add('bad');
+    }
+  }
 }
 
 async function loadFromCloud() {
@@ -438,6 +480,7 @@ async function saveToCloud() {
 function subscribeToRoom() {
   if (!supabaseClient || !currentRoom) return;
   if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
+  const dot = document.getElementById('syncDot');
   realtimeChannel = supabaseClient
     .channel('board-' + currentRoom)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'boards', filter: 'room=eq.' + currentRoom }, payload => {
@@ -447,7 +490,16 @@ function subscribeToRoom() {
         build();
       }
     })
-    .subscribe();
+    .subscribe((status) => {
+      if (!dot) return;
+      if (status === 'SUBSCRIBED') {
+        dot.classList.remove('bad');
+        dot.classList.add('ok');
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        dot.classList.remove('ok');
+        dot.classList.add('bad');
+      }
+    });
 }
 
 initSupabase();
@@ -480,10 +532,52 @@ function reshuffle() {
   if (reshufflesLeft <= 0) return;
   reshufflesLeft--;
   store.setItem('playfulPlacesReshuffles', reshufflesLeft);
-  currentPlaces = getFreshPlaces();
+
+  // Collect places already on the board that are marked (keep them)
+  const kept = {};
+  const usedOnBoard = new Set();
+  for (let i = 0; i < 25; i++) {
+    if (i === 12) continue;
+    if (isMarked(i)) {
+      const idx = i < 12 ? i : i - 1;
+      const name = currentPlaces[idx];
+      if (name) {
+        kept[i] = name;
+        usedOnBoard.add(name);
+      }
+    }
+  }
+
+  // Get fresh places excluding ones already kept
+  let available = places.filter(p => !usedOnBoard.has(p) && !usedPlaces.includes(p));
+  if (available.length < 24) {
+    available = places.filter(p => !usedOnBoard.has(p));
+  }
+  const shuffled = [...available].sort(() => Math.random() - 0.5);
+
+  // Build new currentPlaces: keep marked, fill empty
+  const newPlaces = [];
+  let freshIdx = 0;
+  for (let i = 0; i < 25; i++) {
+    if (i === 12) continue;
+    if (kept[i]) {
+      newPlaces.push(kept[i]);
+    } else {
+      newPlaces.push(shuffled[freshIdx++] || places[freshIdx % places.length]);
+    }
+  }
+
+  currentPlaces = newPlaces;
   store.setItem('playfulPlacesCurrent', JSON.stringify(currentPlaces));
-  data = {};
+
+  // Remove data for cells that were not kept
+  const newData = {};
+  for (let i = 0; i < 25; i++) {
+    if (kept[i] && data[i]) newData[i] = data[i];
+  }
+  data = newData;
   store.setItem('playfulPlaces', JSON.stringify(data));
+
   clearHighlights();
   newCardBanner.classList.remove('show');
   updateReshuffleBtn();
@@ -571,6 +665,14 @@ function openModal(div) {
   if (modal) {
     modal.classList.add('show');
     modal.style.display = 'flex';
+    modal.style.position = 'fixed';
+    modal.style.top = '0';
+    modal.style.left = '0';
+    modal.style.width = '100vw';
+    modal.style.height = '100vh';
+    modal.style.zIndex = '99999';
+    modal.style.alignItems = 'center';
+    modal.style.justifyContent = 'center';
   }
 }
 
@@ -578,7 +680,6 @@ function closeModal() {
   if (!modal) return;
   modal.classList.remove('show');
   modal.style.display = 'none';
-  modal.style.visibility = 'hidden';
   currentCell = null;
 }
 
@@ -774,5 +875,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 </script>
+
+  </div>
 </body>
 </html>
