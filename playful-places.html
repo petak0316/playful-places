@@ -435,22 +435,21 @@ function initSupabase() {
 }
 
 async function joinRoom() {
-  const code = document.getElementById('roomCode').value.trim().toLowerCase();
+  const code = document.getElementById('roomCode').value.trim().toLowerCase().replace(/\s+/g, '');
   if (!code) return;
   currentRoom = code;
   localStorage.setItem('playfulRoom', code);
+  document.getElementById('roomCode').value = code;
   const statusEl = document.getElementById('syncStatus');
   const box = document.getElementById('syncBox');
   const dot = document.getElementById('syncDot');
   if (statusEl) statusEl.textContent = 'Connecting…';
   try {
     const hadCloud = await loadFromCloud();
-    if (!hadCloud) {
-      // No cloud card yet — push ours so the other device matches
+    if (!hadCloud || !currentPlaces || currentPlaces.length < 24) {
       if (!currentPlaces || currentPlaces.length < 24) {
         currentPlaces = getFreshPlaces();
         store.setItem('playfulPlacesCurrent', JSON.stringify(currentPlaces));
-        build();
       }
       await saveToCloud();
     }
@@ -461,7 +460,9 @@ async function joinRoom() {
       dot.classList.remove('bad');
       dot.classList.add('ok');
     }
+    build();
   } catch (e) {
+    console.error(e);
     if (statusEl) statusEl.textContent = 'Failed';
     if (dot) {
       dot.classList.remove('ok');
@@ -474,17 +475,21 @@ async function loadFromCloud() {
   if (!supabaseClient || !currentRoom) return false;
   const { data: row } = await supabaseClient.from('boards').select('state').eq('room', currentRoom).maybeSingle();
   if (row && row.state) {
-    const parsed = JSON.parse(row.state);
-    if (parsed.marks) {
-      data = parsed.marks;
-      store.setItem('playfulPlaces', JSON.stringify(data));
+    try {
+      const parsed = JSON.parse(row.state);
+      if (parsed.marks) {
+        data = parsed.marks;
+        store.setItem('playfulPlaces', JSON.stringify(data));
+      }
+      if (parsed.places && parsed.places.length >= 24) {
+        currentPlaces = parsed.places;
+        store.setItem('playfulPlacesCurrent', JSON.stringify(currentPlaces));
+      }
+      build();
+      return !!(parsed.places && parsed.places.length >= 24);
+    } catch (e) {
+      console.error('parse error', e);
     }
-    if (parsed.places && parsed.places.length >= 24) {
-      currentPlaces = parsed.places;
-      store.setItem('playfulPlacesCurrent', JSON.stringify(currentPlaces));
-    }
-    build();
-    return true;
   }
   return false;
 }
