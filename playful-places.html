@@ -444,7 +444,16 @@ async function joinRoom() {
   const dot = document.getElementById('syncDot');
   if (statusEl) statusEl.textContent = 'Connecting…';
   try {
-    await loadFromCloud();
+    const hadCloud = await loadFromCloud();
+    if (!hadCloud) {
+      // No cloud card yet — push ours so the other device matches
+      if (!currentPlaces || currentPlaces.length < 24) {
+        currentPlaces = getFreshPlaces();
+        store.setItem('playfulPlacesCurrent', JSON.stringify(currentPlaces));
+        build();
+      }
+      await saveToCloud();
+    }
     subscribeToRoom();
     if (statusEl) statusEl.textContent = 'Synced';
     if (box) box.style.display = 'none';
@@ -462,7 +471,7 @@ async function joinRoom() {
 }
 
 async function loadFromCloud() {
-  if (!supabaseClient || !currentRoom) return;
+  if (!supabaseClient || !currentRoom) return false;
   const { data: row } = await supabaseClient.from('boards').select('state').eq('room', currentRoom).maybeSingle();
   if (row && row.state) {
     const parsed = JSON.parse(row.state);
@@ -475,7 +484,9 @@ async function loadFromCloud() {
       store.setItem('playfulPlacesCurrent', JSON.stringify(currentPlaces));
     }
     build();
+    return true;
   }
+  return false;
 }
 
 async function saveToCloud() {
