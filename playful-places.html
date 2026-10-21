@@ -434,33 +434,39 @@ function initSupabase() {
   supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 }
 
+let isMaster = false;
+
 async function joinRoom() {
   const code = document.getElementById('roomCode').value.trim().toLowerCase().replace(/\s+/g, '');
   if (!code) return;
   currentRoom = code;
+  isMaster = (code === 'melissa1');
   localStorage.setItem('playfulRoom', code);
   document.getElementById('roomCode').value = code;
   const statusEl = document.getElementById('syncStatus');
   const box = document.getElementById('syncBox');
   const dot = document.getElementById('syncDot');
-  if (statusEl) statusEl.textContent = 'Connecting…';
+  if (statusEl) statusEl.textContent = isMaster ? 'Master…' : 'Slave…';
   try {
     const hadCloud = await loadFromCloud();
-    if (!hadCloud || !currentPlaces || currentPlaces.length < 24) {
-      if (!currentPlaces || currentPlaces.length < 24) {
-        currentPlaces = getFreshPlaces();
-        store.setItem('playfulPlacesCurrent', JSON.stringify(currentPlaces));
+    if (isMaster) {
+      if (!hadCloud || !currentPlaces || currentPlaces.length < 24) {
+        if (!currentPlaces || currentPlaces.length < 24) {
+          currentPlaces = getFreshPlaces();
+          store.setItem('playfulPlacesCurrent', JSON.stringify(currentPlaces));
+        }
+        await saveToCloud();
       }
-      await saveToCloud();
     }
     subscribeToRoom();
-    if (statusEl) statusEl.textContent = 'Synced';
+    if (statusEl) statusEl.textContent = isMaster ? 'Master' : 'Synced';
     if (box) box.style.display = 'none';
     if (dot) {
       dot.classList.remove('bad');
       dot.classList.add('ok');
     }
     build();
+    updateReshuffleBtn();
   } catch (e) {
     console.error(e);
     if (statusEl) statusEl.textContent = 'Failed';
@@ -472,8 +478,9 @@ async function joinRoom() {
 }
 
 async function loadFromCloud() {
-  if (!supabaseClient || !currentRoom) return false;
-  const { data: row } = await supabaseClient.from('boards').select('state').eq('room', currentRoom).maybeSingle();
+  if (!supabaseClient) return false;
+  const loadRoom = isMaster ? currentRoom : 'melissa1';
+  const { data: row } = await supabaseClient.from('boards').select('state').eq('room', loadRoom).maybeSingle();
   if (row && row.state) {
     try {
       const parsed = JSON.parse(row.state);
@@ -485,6 +492,10 @@ async function loadFromCloud() {
         currentPlaces = parsed.places;
         store.setItem('playfulPlacesCurrent', JSON.stringify(currentPlaces));
       }
+      if (parsed.reshuffles !== undefined) {
+        reshufflesLeft = parsed.reshuffles;
+        store.setItem('playfulPlacesReshuffles', reshufflesLeft);
+      }
       build();
       return !!(parsed.places && parsed.places.length >= 24);
     } catch (e) {
@@ -495,18 +506,19 @@ async function loadFromCloud() {
 }
 
 async function saveToCloud() {
-  if (!supabaseClient || !currentRoom) return;
-  const state = JSON.stringify({ marks: data, places: currentPlaces });
-  await supabaseClient.from('boards').upsert({ room: currentRoom, state, updated: new Date().toISOString() });
+  if (!supabaseClient || !currentRoom || !isMaster) return;
+  const state = JSON.stringify({ marks: data, places: currentPlaces, reshuffles: reshufflesLeft });
+  await supabaseClient.from('boards').upsert({ room: 'melissa1', state, updated: new Date().toISOString() });
 }
 
 function subscribeToRoom() {
   if (!supabaseClient || !currentRoom) return;
   if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
+  const listenRoom = isMaster ? currentRoom : 'melissa1';
   const dot = document.getElementById('syncDot');
   realtimeChannel = supabaseClient
-    .channel('board-' + currentRoom)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'boards', filter: 'room=eq.' + currentRoom }, payload => {
+    .channel('board-' + listenRoom)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'boards', filter: 'room=eq.' + listenRoom }, payload => {
       if (payload.new && payload.new.state) {
         const parsed = JSON.parse(payload.new.state);
         if (parsed.marks) {
@@ -517,7 +529,12 @@ function subscribeToRoom() {
           currentPlaces = parsed.places;
           store.setItem('playfulPlacesCurrent', JSON.stringify(currentPlaces));
         }
+        if (parsed.reshuffles !== undefined) {
+          reshufflesLeft = parsed.reshuffles;
+          store.setItem('playfulPlacesReshuffles', reshufflesLeft);
+        }
         build();
+        updateReshuffleBtn();
       }
     })
     .subscribe((status) => {
@@ -559,6 +576,7 @@ function getFreshPlaces() {
 }
 
 function reshuffle() {
+  if (!isMaster) return;
   if (reshufflesLeft <= 0) return;
   reshufflesLeft--;
   store.setItem('playfulPlacesReshuffles', reshufflesLeft);
@@ -618,6 +636,11 @@ function reshuffle() {
 function updateReshuffleBtn() {
   const btn = document.getElementById('reshuffleBtn');
   if (btn) {
+    if (!isMaster) {
+      btn.style.display = 'none';
+      return;
+    }
+    btn.style.display = '';
     btn.textContent = reshufflesLeft > 0 ? `Reshuffle (${reshufflesLeft} left)` : 'Reshuffle (0 left)';
     btn.disabled = reshufflesLeft <= 0;
     btn.style.opacity = reshufflesLeft <= 0 ? '0.5' : '1';
