@@ -465,15 +465,22 @@ async function loadFromCloud() {
   if (!supabaseClient || !currentRoom) return;
   const { data: row } = await supabaseClient.from('boards').select('state').eq('room', currentRoom).maybeSingle();
   if (row && row.state) {
-    data = JSON.parse(row.state);
-    store.setItem('playfulPlaces', row.state);
+    const parsed = JSON.parse(row.state);
+    if (parsed.marks) {
+      data = parsed.marks;
+      store.setItem('playfulPlaces', JSON.stringify(data));
+    }
+    if (parsed.places && parsed.places.length >= 24) {
+      currentPlaces = parsed.places;
+      store.setItem('playfulPlacesCurrent', JSON.stringify(currentPlaces));
+    }
     build();
   }
 }
 
 async function saveToCloud() {
   if (!supabaseClient || !currentRoom) return;
-  const state = JSON.stringify(data);
+  const state = JSON.stringify({ marks: data, places: currentPlaces });
   await supabaseClient.from('boards').upsert({ room: currentRoom, state, updated: new Date().toISOString() });
 }
 
@@ -485,8 +492,15 @@ function subscribeToRoom() {
     .channel('board-' + currentRoom)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'boards', filter: 'room=eq.' + currentRoom }, payload => {
       if (payload.new && payload.new.state) {
-        data = JSON.parse(payload.new.state);
-        store.setItem('playfulPlaces', payload.new.state);
+        const parsed = JSON.parse(payload.new.state);
+        if (parsed.marks) {
+          data = parsed.marks;
+          store.setItem('playfulPlaces', JSON.stringify(data));
+        }
+        if (parsed.places && parsed.places.length >= 24) {
+          currentPlaces = parsed.places;
+          store.setItem('playfulPlacesCurrent', JSON.stringify(currentPlaces));
+        }
         build();
       }
     })
@@ -582,6 +596,7 @@ function reshuffle() {
   newCardBanner.classList.remove('show');
   updateReshuffleBtn();
   build();
+  saveToCloud();
 }
 
 function updateReshuffleBtn() {
@@ -819,6 +834,7 @@ function newCard() {
   updateReshuffleBtn();
   build();
   document.getElementById('roundNum').textContent = round;
+  saveToCloud();
 }
 
 function resetBoard() {
