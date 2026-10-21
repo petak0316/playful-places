@@ -568,11 +568,17 @@ function openModal(div) {
   setMethodButtons('butt', entry.methodButt !== undefined ? entry.methodButt : 1);
   const title = document.getElementById('modalTitle');
   if (title) title.textContent = div.querySelector('.cell-name')?.textContent || 'Mark';
-  if (modal) modal.classList.add('show');
+  if (modal) {
+    modal.classList.add('show');
+    modal.style.display = 'flex';
+  }
 }
 
 function closeModal() {
-  modal.classList.remove('show');
+  if (modal) {
+    modal.classList.remove('show');
+    modal.style.display = 'none';
+  }
   currentCell = null;
 }
 
@@ -752,6 +758,10 @@ document.querySelectorAll('.md-toggle').forEach(toggle => {
 updateReshuffleBtn();
 selectingNeighbor = false;
 wildcardCell = null;
+if (modal) {
+  modal.classList.remove('show');
+  modal.style.display = 'none';
+}
 build();
 if (document.getElementById('roundNum')) {
   document.getElementById('roundNum').textContent = round;
