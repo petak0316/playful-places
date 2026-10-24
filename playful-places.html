@@ -660,7 +660,21 @@ function build() {
     div.dataset.i = i;
     if (i === 12) {
       div.classList.add('free');
-      div.innerHTML = '<div class="cell-name">FREE<br>(bed on back)</div>';
+      const entry = data[12] || {};
+      let tags = '';
+      if (entry.ext) tags += '<span class="tag-ext">❤️</span>';
+      if (entry.int) tags += '<span class="tag-int">🎆</span>';
+      if (entry.butt) tags += '<span class="tag-butt">🍑</span>';
+      if (entry.finished) tags += '<span style="color:#fff;font-size:11px;">✓</span>';
+      if (entry.ext) tags += `<span style="font-size:9px;opacity:0.7;">${entry.methodExt ? 'T' : 'F'}</span>`;
+      if (entry.int) tags += `<span style="font-size:9px;opacity:0.7;">${entry.methodInt ? 'T' : 'F'}</span>`;
+      if (entry.butt) tags += `<span style="font-size:9px;opacity:0.7;">${entry.methodButt ? 'T' : 'F'}</span>`;
+      const ts = entry.ts ? `<div class="timestamp">${formatTime(entry.ts)}</div>` : '';
+      div.innerHTML = `<div class="cell-name">FREE<br>(bed on back)</div><div class="tags">${tags}</div>${ts}`;
+      if (entry.ext || entry.int || entry.butt) {
+        div.style.outline = '2px solid #ff6b9d';
+        div.style.boxShadow = '0 0 0 1px #ff6b9d';
+      }
     } else {
       const idx = i < 12 ? i : i - 1;
       const name = currentPlaces[idx] || places[idx % places.length];
@@ -682,7 +696,7 @@ function build() {
 }
 
 function openModal(div) {
-  if (!div || div.classList.contains('free')) return;
+  if (!div) return;
   if (selectingNeighbor) {
     const i = +div.dataset.i;
     if (i === wildcardCell) {
@@ -774,7 +788,14 @@ function clearHighlights() {
   document.querySelectorAll('.cell').forEach(cell => {
     cell.style.outline = '';
     cell.style.background = '';
+    cell.style.boxShadow = '';
   });
+  // Re-apply persistent mark highlight on free space if it has data
+  const freeCell = board.children[12];
+  if (freeCell && data[12] && (data[12].ext || data[12].int || data[12].butt)) {
+    freeCell.style.outline = '2px solid #ff6b9d';
+    freeCell.style.boxShadow = '0 0 0 1px #ff6b9d';
+  }
   status.textContent = '';
 }
 
