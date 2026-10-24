@@ -416,6 +416,7 @@ const status = document.getElementById('status');
 const modal = document.getElementById('modal');
 const popup = document.getElementById('popup');
 const newCardBanner = document.getElementById('newCardBanner');
+let round = parseInt(store.getItem('playfulPlacesRound') || '1');
 let data = safeParse(store.getItem('playfulPlaces'), {});
 let usedPlaces = safeParse(store.getItem('playfulPlacesUsed'), []);
 let currentPlaces = safeParse(store.getItem('playfulPlacesCurrent'), null);
@@ -856,23 +857,32 @@ function checkBingo() {
   ];
   const won = lines.some(line => line.every(i => i === 12 || isMarked(i)));
   status.textContent = won ? 'BINGO!' : 'Not yet — keep going.';
-  if (won) newCardBanner.classList.add('show');
+  if (won) {
+    newCardBanner.classList.add('show');
+    // Auto-offer clean reset path
+    setTimeout(() => {
+      if (confirm('Bingo! Start a fresh card?')) {
+        newCard();
+      }
+    }, 400);
+  }
 }
 
 function newCard() {
   data = {};
   store.setItem('playfulPlaces', JSON.stringify(data));
-  currentPlaces = null;
   store.removeItem('playfulPlacesCurrent');
+  currentPlaces = null;
   reshufflesLeft = 2;
   store.setItem('playfulPlacesReshuffles', reshufflesLeft);
-  round++;
+  round = (parseInt(round) || 1) + 1;
   store.setItem('playfulPlacesRound', round);
   newCardBanner.classList.remove('show');
   status.textContent = '';
   updateReshuffleBtn();
   build();
-  document.getElementById('roundNum').textContent = round;
+  const roundEl = document.getElementById('roundNum');
+  if (roundEl) roundEl.textContent = round;
   saveToCloud();
 }
 
@@ -880,10 +890,13 @@ function resetBoard() {
   if (!confirm('Clear all marks on this card?')) return;
   data = {};
   store.removeItem('playfulPlaces');
+  store.setItem('playfulPlaces', JSON.stringify(data));
   newCardBanner.classList.remove('show');
-  build();
   status.textContent = '';
-  document.getElementById('roundNum').textContent = round;
+  build();
+  const roundEl = document.getElementById('roundNum');
+  if (roundEl) roundEl.textContent = round;
+  saveToCloud();
 }
 
 modal.onclick = e => { if (e.target === modal) closeModal(); };
