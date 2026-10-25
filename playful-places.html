@@ -270,6 +270,7 @@
     <button onclick="checkBingo()">Check Bingo</button>
     <button class="secondary" onclick="reshuffle()" id="reshuffleBtn">Reshuffle (2 left)</button>
     <button class="secondary" onclick="resetBoard()">Reset</button>
+    <button class="secondary" onclick="downloadLog()">Download Log</button>
   </div>
   <div class="sync-box" id="syncBox">
     <input type="text" id="roomCode" placeholder="Sync code" maxlength="12" style="padding:10px; border-radius:10px; border:1px solid #444; background:#1e1e24; color:#fff; width:140px; text-align:center; font-size:16px;">
@@ -831,6 +832,7 @@ function saveMark() {
         methodExt, methodInt, methodButt,
         ts: prev.ts || Date.now()
       };
+      logSelection(cellIdx, data[cellIdx]);
     }
     store.setItem('playfulPlaces', JSON.stringify(data));
     saveToCloud();
@@ -857,6 +859,84 @@ function saveMark() {
     console.error(err);
     alert('Save failed: ' + err.message);
   }
+}
+
+let lastLocation = null;
+
+function refreshLocation() {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      lastLocation = {
+        lat: pos.coords.latitude.toFixed(5),
+        lon: pos.coords.longitude.toFixed(5),
+        accuracy: Math.round(pos.coords.accuracy)
+      };
+    },
+    err => { console.warn('Location unavailable', err); },
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }
+  );
+}
+
+function logSelection(cellIdx, mark) {
+  try {
+    const logs = safeParse(store.getItem('playfulPlacesLog'), []);
+    let placeName = 'Unknown';
+    if (cellIdx === 12) {
+      placeName = 'FREE (bed on back)';
+    } else if (currentPlaces && currentPlaces.length) {
+      const idx = cellIdx < 12 ? cellIdx : cellIdx - 1;
+      placeName = currentPlaces[idx] || 'Unknown';
+    }
+    const entry = {
+      timestamp: new Date().toISOString(),
+      date: new Date().toLocaleDateString(),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      round: round,
+      cell: cellIdx,
+      place: placeName,
+      external: mark.ext ? 'Yes' : 'No',
+      externalMethod: mark.ext ? (mark.methodExt ? 'Toy' : 'Fingers') : '',
+      internal: mark.int ? 'Yes' : 'No',
+      internalMethod: mark.int ? (mark.methodInt ? 'Toy' : 'Fingers') : '',
+      butt: mark.butt ? 'Yes' : 'No',
+      buttMethod: mark.butt ? (mark.methodButt ? 'Toy' : 'Fingers') : '',
+      finished: mark.finished ? 'Yes' : 'No',
+      latitude: lastLocation ? lastLocation.lat : '',
+      longitude: lastLocation ? lastLocation.lon : '',
+      locationAccuracyM: lastLocation ? lastLocation.accuracy : ''
+    };
+    logs.push(entry);
+    store.setItem('playfulPlacesLog', JSON.stringify(logs));
+    // Refresh location in the background for the next mark
+    refreshLocation();
+  } catch (e) {
+    console.error('Log failed', e);
+  }
+}
+
+function downloadLog() {
+  const logs = safeParse(store.getItem('playfulPlacesLog'), []);
+  if (!logs.length) {
+    alert('No log entries yet.');
+    return;
+  }
+  const headers = ['Timestamp','Date','Time','Round','Cell','Place','External','External Method','Internal','Internal Method','Butt','Butt Method','Finished','Latitude','Longitude','Location Accuracy (m)'];
+  const rows = logs.map(l => [
+    l.timestamp, l.date, l.time, l.round, l.cell, `"${(l.place || '').replace(/"/g, '""')}"`,
+    l.external, l.externalMethod, l.internal, l.internalMethod, l.butt, l.buttMethod, l.finished,
+    l.latitude || '', l.longitude || '', l.locationAccuracyM || ''
+  ]);
+  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `playful-places-log-${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function isMarked(i) {
@@ -957,6 +1037,7 @@ build();
 if (document.getElementById('roundNum')) {
   document.getElementById('roundNum').textContent = round;
 }
+refreshLocation();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
